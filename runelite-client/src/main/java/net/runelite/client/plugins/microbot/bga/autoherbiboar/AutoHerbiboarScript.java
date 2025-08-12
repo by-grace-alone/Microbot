@@ -57,8 +57,11 @@ public class AutoHerbiboarScript extends Script {
                                 WorldPoint finishLoc = herbiboarPlugin.getEndLocations().get(finishId - 1);
                                 TileObject tunnel = herbiboarPlugin.getTunnels().get(finishLoc);
                                 int dist = Rs2Player.getWorldLocation().distanceTo(finishLoc);
-                                if (dist <= 8) { Rs2GameObject.interact(tunnel, "Attack", true); attackedTunnel = true; }
-                                else if (!Rs2Player.isMoving()) Rs2Walker.walkTo(finishLoc);
+                                if (dist <= 8) {
+                                    Rs2GameObject.interact(tunnel, "Search", true);
+                                    Rs2GameObject.interact(tunnel, "Attack", true);
+                                    attackedTunnel = true;
+                                } else if (!Rs2Player.isMoving()) Rs2Walker.walkTo(finishLoc);
                             }
                         } else {
                             Rs2NpcModel herb = Rs2Npc.getNpc("Herbiboar");
@@ -72,6 +75,7 @@ public class AutoHerbiboarScript extends Script {
                             WorldPoint loc = herb.getWorldLocation();
                             if (Rs2Player.getWorldLocation().distanceTo(loc) <= 20) {
                                 Rs2Npc.interact(herb, "Harvest");
+                                try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
                                 TileObject start = herbiboarPlugin.getStarts().values().stream().findFirst().orElse(null);
                                 if (start != null) Rs2Walker.walkTo(start.getWorldLocation());
                                 attackedTunnel = false;
