@@ -120,6 +120,7 @@ public class BanksShopperScript extends Script {
                                         System.out.println("Invalid action specified in config.");
                                 }
                             }
+                            if (successfullAction) Rs2Inventory.waitForInventoryChanges(2000);
                             Rs2Shop.closeShop();
                             if (successfullAction) {
                                 state = ShopperState.HOPPING;
