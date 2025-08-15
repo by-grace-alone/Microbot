@@ -70,6 +70,9 @@ public class BanksShopperScript extends Script {
                         boolean successfullAction = false;
                         boolean outOfStock = false;
                         if (Rs2Shop.isOpen()) {
+                            // Wait a bit for shop to fully load
+                            sleepGaussian(300, 50);
+                            
                             for (String itemName : plugin.getItemNames()) {
                                 if (!isRunning() || Microbot.pauseAllScripts.get()) break;
                                 if (itemName.length() <= 1) continue;
@@ -80,14 +83,16 @@ public class BanksShopperScript extends Script {
                                         if (itemName.matches("\\d+")) {
                                             outOfStock = !Rs2Shop.hasMinimumStock(Integer.parseInt(itemName), plugin.getMinStock());
                                             if (outOfStock) continue;
-                                            successfullAction = processBuyAction(Integer.parseInt(itemName), plugin.getSelectedQuantity().toString());
+                                            successfullAction = processBuyActionWithValidation(Integer.parseInt(itemName), plugin.getSelectedQuantity().toString());
                                         } else {
                                             outOfStock = !Rs2Shop.hasMinimumStock(itemName, plugin.getMinStock());
                                             if (outOfStock) continue;
-                                            successfullAction = processBuyAction(itemName, plugin.getSelectedQuantity().toString());
+                                            successfullAction = processBuyActionWithValidation(itemName, plugin.getSelectedQuantity().toString());
                                         }
                                         if (Rs2Inventory.isFull()){
                                             System.out.println("Inventory is full, stopping buy action to bank.");
+                                            // Wait before closing to ensure any pending transactions complete
+                                            sleepGaussian(500, 100);
                                             Rs2Shop.closeShop();
                                             state = ShopperState.BANKING;
                                             return;
@@ -120,6 +125,13 @@ public class BanksShopperScript extends Script {
                                         System.out.println("Invalid action specified in config.");
                                 }
                             }
+                            
+                            // Wait before closing shop to ensure all transactions are processed
+                            if (successfullAction) {
+                                System.out.println("Waiting for transactions to complete before closing shop...");
+                                sleepGaussian(800, 200);
+                            }
+                            
                             Rs2Shop.closeShop();
                             if (successfullAction) {
                                 state = ShopperState.HOPPING;
@@ -179,10 +191,223 @@ public class BanksShopperScript extends Script {
 
 
     /**
+     * Processes the buy action for the specified item with proper validation.
+     * @param itemName The name of the item to buy.
+     * @param quantity The quantity of the item to buy.
+     * @return true if bought successfully, false otherwise.
+     */
+    private boolean processBuyActionWithValidation(String itemName, String quantity) {
+        if (Rs2Inventory.isFull()) {
+            System.out.println("Avoid buying item - Inventory is full");
+            return false;
+        }
+
+        // Use enhanced validation if enabled
+        if (plugin.isUseEnhancedValidation()) {
+            return processBuyActionWithEnhancedValidation(itemName, quantity);
+        }
+
+        // Record initial inventory state
+        int initialItemCount = Rs2Inventory.count(itemName);
+        
+        System.out.println("Attempting to buy " + quantity + " " + itemName + " (initial count: " + initialItemCount + ")");
+        
+        boolean boughtItem = Rs2Shop.buyItem(itemName, quantity);
+
+        if (boughtItem) {
+            // Wait for inventory changes with a longer timeout
+            boolean inventoryChanged = Rs2Inventory.waitForInventoryChanges(5000);
+            
+            if (inventoryChanged) {
+                // Verify the purchase actually succeeded by checking inventory
+                int finalItemCount = Rs2Inventory.count(itemName);
+                int expectedIncrease = parseQuantityString(quantity);
+                
+                if (finalItemCount >= initialItemCount + expectedIncrease) {
+                    System.out.println("Successfully verified purchase of " + quantity + " " + itemName + 
+                                     " (count changed from " + initialItemCount + " to " + finalItemCount + ")");
+                    return true;
+                } else {
+                    System.out.println("Purchase verification failed for " + itemName + 
+                                     " - expected increase: " + expectedIncrease + 
+                                     ", actual increase: " + (finalItemCount - initialItemCount));
+                    return false;
+                }
+            } else {
+                System.out.println("No inventory changes detected after buy attempt for " + itemName);
+                return false;
+            }
+        }
+
+        System.out.println("Failed to buy " + quantity + " " + itemName);
+        return false;
+    }
+
+    /**
+     * Processes the buy action for the specified item with proper validation.
+     * @param itemID The ID of the item to buy.
+     * @param quantity The quantity of the item to buy.
+     * @return true if bought successfully, false otherwise.
+     */
+    private boolean processBuyActionWithValidation(int itemID, String quantity) {
+        if (Rs2Inventory.isFull()) {
+            System.out.println("Avoid buying item - Inventory is full");
+            return false;
+        }
+
+        // Use enhanced validation if enabled
+        if (plugin.isUseEnhancedValidation()) {
+            return processBuyActionWithEnhancedValidation(itemID, quantity);
+        }
+
+        // Record initial inventory state
+        int initialItemCount = Rs2Inventory.count(itemID);
+        
+        System.out.println("Attempting to buy " + quantity + " item ID " + itemID + " (initial count: " + initialItemCount + ")");
+        
+        boolean boughtItem = Rs2Shop.buyItem(itemID, quantity);
+
+        if (boughtItem) {
+            // Wait for inventory changes with a longer timeout
+            boolean inventoryChanged = Rs2Inventory.waitForInventoryChanges(5000);
+            
+            if (inventoryChanged) {
+                // Verify the purchase actually succeeded by checking inventory
+                int finalItemCount = Rs2Inventory.count(itemID);
+                int expectedIncrease = parseQuantityString(quantity);
+                
+                if (finalItemCount >= initialItemCount + expectedIncrease) {
+                    System.out.println("Successfully verified purchase of " + quantity + " item ID " + itemID + 
+                                     " (count changed from " + initialItemCount + " to " + finalItemCount + ")");
+                    return true;
+                } else {
+                    System.out.println("Purchase verification failed for item ID " + itemID + 
+                                     " - expected increase: " + expectedIncrease + 
+                                     ", actual increase: " + (finalItemCount - initialItemCount));
+                    return false;
+                }
+            } else {
+                System.out.println("No inventory changes detected after buy attempt for item ID " + itemID);
+                return false;
+            }
+        }
+
+        System.out.println("Failed to buy " + quantity + " item ID " + itemID);
+        return false;
+    }
+
+    /**
+     * Enhanced buy validation using both inventory and shop change verification.
+     * @param itemName The name of the item to buy.
+     * @param quantity The quantity of the item to buy.
+     * @return true if bought successfully, false otherwise.
+     */
+    private boolean processBuyActionWithEnhancedValidation(String itemName, String quantity) {
+        if (Rs2Inventory.isFull()) {
+            System.out.println("Avoid buying item - Inventory is full");
+            return false;
+        }
+
+        // Record initial states
+        int initialItemCount = Rs2Inventory.count(itemName);
+        
+        System.out.println("Attempting enhanced purchase of " + quantity + " " + itemName + " (initial count: " + initialItemCount + ")");
+        
+        // Use the enhanced shop method that waits for shop changes
+        boolean boughtItem = Rs2Shop.buyItemWithConfirmation(itemName, quantity);
+
+        if (boughtItem) {
+            // Double-check with inventory validation
+            boolean inventoryChanged = Rs2Inventory.waitForInventoryChanges(2000);
+            
+            if (inventoryChanged) {
+                int finalItemCount = Rs2Inventory.count(itemName);
+                int expectedIncrease = parseQuantityString(quantity);
+                
+                if (finalItemCount >= initialItemCount + expectedIncrease) {
+                    System.out.println("Enhanced validation successful - purchase of " + quantity + " " + itemName + 
+                                     " confirmed (count: " + initialItemCount + " -> " + finalItemCount + ")");
+                    return true;
+                } else {
+                    System.out.println("Enhanced validation failed - inventory mismatch for " + itemName);
+                    return false;
+                }
+            } else {
+                System.out.println("Enhanced validation failed - no inventory changes for " + itemName);
+                return false;
+            }
+        }
+
+        System.out.println("Enhanced purchase failed for " + quantity + " " + itemName);
+        return false;
+    }
+
+    /**
+     * Enhanced buy validation using both inventory and shop change verification.
+     * @param itemID The ID of the item to buy.
+     * @param quantity The quantity of the item to buy.
+     * @return true if bought successfully, false otherwise.
+     */
+    private boolean processBuyActionWithEnhancedValidation(int itemID, String quantity) {
+        if (Rs2Inventory.isFull()) {
+            System.out.println("Avoid buying item - Inventory is full");
+            return false;
+        }
+
+        // Record initial states
+        int initialItemCount = Rs2Inventory.count(itemID);
+        
+        System.out.println("Attempting enhanced purchase of " + quantity + " item ID " + itemID + " (initial count: " + initialItemCount + ")");
+        
+        // Use the enhanced shop method that waits for shop changes
+        boolean boughtItem = Rs2Shop.buyItemWithConfirmation(itemID, quantity);
+
+        if (boughtItem) {
+            // Double-check with inventory validation
+            boolean inventoryChanged = Rs2Inventory.waitForInventoryChanges(2000);
+            
+            if (inventoryChanged) {
+                int finalItemCount = Rs2Inventory.count(itemID);
+                int expectedIncrease = parseQuantityString(quantity);
+                
+                if (finalItemCount >= initialItemCount + expectedIncrease) {
+                    System.out.println("Enhanced validation successful - purchase of " + quantity + " item ID " + itemID + 
+                                     " confirmed (count: " + initialItemCount + " -> " + finalItemCount + ")");
+                    return true;
+                } else {
+                    System.out.println("Enhanced validation failed - inventory mismatch for item ID " + itemID);
+                    return false;
+                }
+            } else {
+                System.out.println("Enhanced validation failed - no inventory changes for item ID " + itemID);
+                return false;
+            }
+        }
+
+        System.out.println("Enhanced purchase failed for " + quantity + " item ID " + itemID);
+        return false;
+    }
+
+    /**
+     * Parses quantity string to integer for validation purposes.
+     * @param quantity The quantity string (e.g., "1", "5", "10", "50")
+     * @return The numeric value of the quantity
+     */
+    private int parseQuantityString(String quantity) {
+        try {
+            return Integer.parseInt(quantity);
+        } catch (NumberFormatException e) {
+            // Default to 1 if parsing fails
+            return 1;
+        }
+    }
+
+    /**
      * Processes the buy action for the specified item.
      * @param itemName The name of the item to buy.
      * @param quantity The quantity of the item to buy.
      * @return true if bought successfully, false otherwise.
+     * @deprecated Use processBuyActionWithValidation instead
      */
     private boolean processBuyAction(String itemName, String quantity) {
         if (Rs2Inventory.isFull()) {

@@ -378,13 +378,151 @@ public class Rs2Shop {
     }
 
     /**
+     * Waits for the shop to change by comparing the current items with the cached values, with a custom timeout.
+     *
+     * @param timeoutMs Maximum time to wait in milliseconds
+     * @return true if the shop has changed, false if it remains the same or timeout reached.
+     */
+    public static boolean waitForShopChanges(long timeoutMs) {
+        final List<Rs2ItemModel> initialShopItems = new ArrayList<>(shopItems);
+
+        return Global.sleepUntil(() -> hasShopChanged(initialShopItems), timeoutMs);
+    }
+
+    /**
+     * Enhanced buy method that waits for shop changes to confirm transaction completion.
+     * 
+     * @param itemName The name of the item to buy
+     * @param quantity The quantity to buy
+     * @return true if successful and shop changes detected, false otherwise
+     */
+    public static boolean buyItemWithConfirmation(String itemName, String quantity) {
+        Microbot.status = "Buying " + quantity + " " + itemName;
+        try {
+            Rs2ItemModel rs2Item = shopItems.stream()
+                    .filter(item -> item.getName().equalsIgnoreCase(itemName))
+                    .findFirst().orElse(null);
+            
+            if (rs2Item == null) {
+                System.out.println("Item " + itemName + " not found in shop");
+                return false;
+            }
+            
+            // Store initial stock for verification
+            int initialStock = rs2Item.getQuantity();
+            String actionAndQuantity = "Buy " + quantity;
+            System.out.println(actionAndQuantity + " (initial stock: " + initialStock + ")");
+            
+            // Check if the item is in stock
+            if (hasStock(itemName)) {
+                System.out.println("We Have Stock of " + itemName);
+                invokeMenu(rs2Item, actionAndQuantity);
+                
+                // Wait for shop changes to confirm transaction
+                boolean shopChanged = waitForShopChanges(3000);
+                if (shopChanged) {
+                    // Verify the stock actually decreased
+                    Rs2ItemModel updatedItem = shopItems.stream()
+                            .filter(item -> item.getName().equalsIgnoreCase(itemName))
+                            .findFirst().orElse(null);
+                    
+                    if (updatedItem != null) {
+                        int finalStock = updatedItem.getQuantity();
+                        System.out.println("Purchase confirmed - stock changed from " + initialStock + " to " + finalStock);
+                        return true;
+                    }
+                }
+                System.out.println("Purchase may have failed - no shop changes detected");
+                return false;
+            } else {
+                System.out.println("Item " + itemName + " is out of stock");
+                return false;
+            }
+
+        } catch (Exception ex) {
+            Microbot.logStackTrace("Rs2Shop", ex);
+        }
+        return false;
+    }
+
+    /**
+     * Enhanced buy method that waits for shop changes to confirm transaction completion.
+     * 
+     * @param itemId The ID of the item to buy
+     * @param quantity The quantity to buy
+     * @return true if successful and shop changes detected, false otherwise
+     */
+    public static boolean buyItemWithConfirmation(int itemId, String quantity) {
+        Microbot.status = "Buying " + quantity + " item with ID " + itemId;
+        try {
+            Rs2ItemModel rs2Item = shopItems.stream()
+                    .filter(item -> item.getId() == itemId)
+                    .findFirst().orElse(null);
+            
+            if (rs2Item == null) {
+                System.out.println("Item with ID " + itemId + " not found in shop");
+                return false;
+            }
+            
+            // Store initial stock for verification
+            int initialStock = rs2Item.getQuantity();
+            String actionAndQuantity = "Buy " + quantity;
+            System.out.println(actionAndQuantity + " (initial stock: " + initialStock + ")");
+            
+            // Check if the item is in stock
+            if (hasStock(itemId)) {
+                System.out.println("We Have Stock of item with ID " + itemId);
+                invokeMenu(rs2Item, actionAndQuantity);
+                
+                // Wait for shop changes to confirm transaction
+                boolean shopChanged = waitForShopChanges(3000);
+                if (shopChanged) {
+                    // Verify the stock actually decreased
+                    Rs2ItemModel updatedItem = shopItems.stream()
+                            .filter(item -> item.getId() == itemId)
+                            .findFirst().orElse(null);
+                    
+                    if (updatedItem != null) {
+                        int finalStock = updatedItem.getQuantity();
+                        System.out.println("Purchase confirmed - stock changed from " + initialStock + " to " + finalStock);
+                        return true;
+                    }
+                }
+                System.out.println("Purchase may have failed - no shop changes detected");
+                return false;
+            } else {
+                System.out.println("Item with ID " + itemId + " is out of stock");
+                return false;
+            }
+
+        } catch (Exception ex) {
+            Microbot.logStackTrace("Rs2Shop", ex);
+        }
+        return false;
+    }
+
+    /**
      * Checks if the shop has changed since the initial items were stored.
      *
      * @param initialShopItems The initial list of shop items to compare against.
      * @return true if the shop has changed, false otherwise.
      */
     private static boolean hasShopChanged(List<Rs2ItemModel> initialShopItems) {
-        return shopItems != initialShopItems;
+        if (shopItems.size() != initialShopItems.size()) {
+            return true;
+        }
+        
+        for (int i = 0; i < shopItems.size(); i++) {
+            Rs2ItemModel current = shopItems.get(i);
+            Rs2ItemModel initial = initialShopItems.get(i);
+            
+            if (current.getId() != initial.getId() || 
+                current.getQuantity() != initial.getQuantity()) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     /**

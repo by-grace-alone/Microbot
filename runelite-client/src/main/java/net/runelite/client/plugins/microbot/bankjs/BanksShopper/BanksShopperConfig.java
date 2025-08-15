@@ -14,6 +14,7 @@ public interface BanksShopperConfig extends Config {
     String useBank = "useBank";
     String logout = "logout";
     String useNextWorld = "useNextWorld";
+    String enhancedValidation = "enhancedValidation";
 
     @ConfigSection(
             name = "Action Settings",
@@ -92,6 +93,17 @@ public interface BanksShopperConfig extends Config {
     )
     default boolean useNextWorld() {
         return false;
+    }
+
+    @ConfigItem(
+            position = 5,
+            keyName = enhancedValidation,
+            name = "Enhanced Transaction Validation",
+            description = "Use enhanced validation to prevent purchase loops by verifying inventory and shop changes",
+            section = actionSection
+    )
+    default boolean useEnhancedValidation() {
+        return true;
     }
 
     @ConfigItem(

@@ -63,6 +63,8 @@ public class BanksShopperPlugin extends Plugin {
     private boolean useLogout;
     @Getter
     private boolean useExactNaming;
+    @Getter
+    private boolean useEnhancedValidation;
 
     @Override
     protected void startUp() throws AWTException {
@@ -74,6 +76,7 @@ public class BanksShopperPlugin extends Plugin {
         useLogout = config.logout();
         useExactNaming = config.useExactNaming();
         useNextWorld = config.useNextWorld();
+        useEnhancedValidation = config.useEnhancedValidation();
         updateItemList(config.itemNames());
         
         if (overlayManager != null) {
@@ -130,6 +133,10 @@ public class BanksShopperPlugin extends Plugin {
 
         if (event.getKey().equals(BanksShopperConfig.useNextWorld)) {
             useNextWorld = config.useNextWorld();
+        }
+        
+        if (event.getKey().equals(BanksShopperConfig.enhancedValidation)) {
+            useEnhancedValidation = config.useEnhancedValidation();
         }
         
         if (event.getKey().equals(BanksShopperConfig.itemNames)) {
