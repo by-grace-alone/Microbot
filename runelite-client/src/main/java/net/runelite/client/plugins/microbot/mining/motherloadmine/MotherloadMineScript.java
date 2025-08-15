@@ -228,31 +228,144 @@ public class MotherloadMineScript extends Script
     private void emptySack()
     {
         ensureLowerFloor();
-
-        while (Microbot.getVarbitValue(VarbitID.MOTHERLODE_SACK_TRANSMIT) > 0 && isRunning())
+        
+        int attempts = 0;
+        final int maxAttempts = 50; // Prevent infinite loops
+        
+        while (attempts < maxAttempts && isRunning())
         {
-            if (Rs2Inventory.count() <= 2)
-            {
-                Rs2GameObject.interact(ObjectID.MOTHERLODE_SACK);
-                sleepUntil(this::hasOreInInventory);
+            final int currentSackCount = Microbot.getVarbitValue(VarbitID.MOTHERLODE_SACK_TRANSMIT);
+            
+            // Exit if sack is empty
+            if (currentSackCount <= 0) {
+                break;
             }
+            
+            // Take from sack if we have space
+            if (Rs2Inventory.count() <= getMaxInventorySlots() - 5) // Leave 5 slots buffer for ores
+            {
+                if (!takeFromSackWithValidation()) {
+                    log.warn("Failed to take from sack, attempt {}/{}", attempts + 1, maxAttempts);
+                    attempts++;
+                    sleep(500, 1000); // Brief pause before retry
+                    continue;
+                }
+            }
+            
+            // Deposit ores if we have any
             if (hasOreInInventory())
             {
-                useDepositBox();
+                if (!useDepositBoxWithValidation()) {
+                    log.warn("Failed to use deposit box, attempt {}/{}", attempts + 1, maxAttempts);
+                    attempts++;
+                    sleep(500, 1000);
+                    continue;
+                }
             }
+            
+            attempts++;
+            sleep(100, 300); // Brief pause between cycles
+        }
+        
+        if (attempts >= maxAttempts) {
+            log.error("Sack emptying failed after {} attempts", maxAttempts);
+            // Could add additional error handling here
         }
 
         shouldEmptySack = false;
-		shouldRepairWaterwheel = false;
+        shouldRepairWaterwheel = false;
         Rs2Antiban.takeMicroBreakByChance();
         status = MLMStatus.IDLE;
+    }
+    
+    private boolean takeFromSackWithValidation() {
+        final int initialSackCount = Microbot.getVarbitValue(VarbitID.MOTHERLODE_SACK_TRANSMIT);
+        final int initialInventoryCount = Rs2Inventory.count();
+        
+        if (!Rs2GameObject.interact(ObjectID.MOTHERLODE_SACK)) {
+            return false;
+        }
+        
+        // Wait for either sack count to decrease OR inventory to change
+        boolean success = sleepUntilTrue(() -> {
+            int currentSackCount = Microbot.getVarbitValue(VarbitID.MOTHERLODE_SACK_TRANSMIT);
+            int currentInventoryCount = Rs2Inventory.count();
+            return currentSackCount < initialSackCount || currentInventoryCount > initialInventoryCount;
+        }, 100, 5000);
+        
+        if (!success) {
+            log.warn("Sack interaction timed out - varbit didn't update as expected. Initial: {}, Current: {}", 
+                    initialSackCount, Microbot.getVarbitValue(VarbitID.MOTHERLODE_SACK_TRANSMIT));
+        }
+        
+        return success;
+    }
+    
+    private boolean useDepositBoxWithValidation() {
+        final int initialOreCount = getOreCount();
+        
+        if (!Rs2DepositBox.openDepositBox()) {
+            return false;
+        }
+        
+        if (!sleepUntil(Rs2DepositBox::isOpen, 5000)) {
+            return false;
+        }
+        
+        // Handle gem bag if present
+        if (Rs2Gembag.hasGemBag() && Rs2Gembag.getGemBagContents().stream().anyMatch(s -> s.getQuantity() > 30))
+        {
+            Rs2Bank.emptyGemBag();
+            sleep(100, 300);
+        }
+
+        // Deposit items
+        if (config.useDepositAll()) {
+            Rs2DepositBox.depositAll();
+        } else {
+            String[] _itemsToKeep = getItemsToKeep().toArray(new String[0]);
+            Rs2DepositBox.depositAllExcept(_itemsToKeep);
+        }
+        
+        // Wait for inventory changes
+        boolean success = sleepUntilTrue(() -> {
+            int currentOreCount = getOreCount();
+            return currentOreCount < initialOreCount;
+        }, 100, 5000);
+        
+        if (!success) {
+            log.warn("Deposit validation failed - ore count didn't decrease. Initial: {}, Current: {}", 
+                    initialOreCount, getOreCount());
+        }
+        
+        // Close deposit box management
+        Rectangle gameObjectBounds = getMotherloadSackBounds();
+        Rectangle depositBoxBounds = Rs2DepositBox.getDepositBoxBounds();
+        if (depositBoxBounds != null && (!Rs2UiHelper.isRectangleWithinViewport(gameObjectBounds) || depositBoxBounds.intersects(gameObjectBounds))) {
+            Rs2DepositBox.closeDepositBox();
+        }
+        
+        return success;
+    }
+    
+    private int getOreCount() {
+        return Rs2Inventory.count(ItemID.RUNITE_ORE) + 
+               Rs2Inventory.count(ItemID.ADAMANTITE_ORE) + 
+               Rs2Inventory.count(ItemID.MITHRIL_ORE) + 
+               Rs2Inventory.count(ItemID.GOLD_ORE) + 
+               Rs2Inventory.count(ItemID.IRON_ORE) + 
+               Rs2Inventory.count(ItemID.COAL);
+    }
+    
+    private int getMaxInventorySlots() {
+        return 28; // Standard inventory size
     }
 
     private boolean hasOreInInventory()
     {
         return Rs2Inventory.contains(
                 ItemID.RUNITE_ORE, ItemID.ADAMANTITE_ORE, ItemID.MITHRIL_ORE,
-                ItemID.GOLD_ORE, ItemID.COAL
+                ItemID.GOLD_ORE, ItemID.IRON_ORE, ItemID.COAL
         );
     }
 
@@ -317,34 +430,7 @@ public class MotherloadMineScript extends Script
         }
     }
 
-    private void useDepositBox()
-    {
-        if (Rs2DepositBox.openDepositBox())
-        {
-            sleepUntil(Rs2DepositBox::isOpen);
 
-            // if using the gem sack, empty its contents directly into the bank
-            if (Rs2Gembag.hasGemBag() && Rs2Gembag.getGemBagContents().stream().anyMatch(s -> s.getQuantity() > 30))
-            {
-				Rs2Bank.emptyGemBag();
-				sleep(100, 300);
-            }
-
-			if (config.useDepositAll()) {
-				Rs2DepositBox.depositAll();
-			} else {
-				String[] _itemsToKeep = getItemsToKeep().toArray(new String[0]);
-				Rs2DepositBox.depositAllExcept(_itemsToKeep);
-				Rs2Inventory.waitForInventoryChanges(5000);
-			}
-
-			Rectangle gameObjectBounds = getMotherloadSackBounds();
-			Rectangle depositBoxBounds = Rs2DepositBox.getDepositBoxBounds();
-			if (depositBoxBounds != null && (!Rs2UiHelper.isRectangleWithinViewport(gameObjectBounds) || depositBoxBounds.intersects(gameObjectBounds))) {
-				Rs2DepositBox.closeDepositBox();
-			}
-        }
-    }
 
 	private void setupInventory() {
 		if (!config.useInventorySetup()) {
